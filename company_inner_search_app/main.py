@@ -79,7 +79,24 @@ if not "initialized" in st.session_state:
 # サイドバー表示（モード選択＋説明）
 cn.display_sidebar()
 
-# タイトル表示
+# 👇ここに追加（サイドバーにボタンを置く）
+from pathlib import Path
+
+DATA_DIR = Path(__file__).resolve().parent / "data"
+
+if st.sidebar.button("ファイルチェック"):
+    if DATA_DIR.exists():
+        files = list(DATA_DIR.glob("**/*"))
+        if files:
+            st.success(f"{len(files)} 件のファイルを発見しました")
+            for f in files[:10]:
+                st.write(f"→ {f}")
+        else:
+            st.warning("data/ フォルダはあるが、中にファイルがありません")
+    else:
+        st.error("data/ フォルダが存在しません")
+
+# タイトル表示ｃ
 cn.display_app_title()
 
 # AIメッセージの初期表示
