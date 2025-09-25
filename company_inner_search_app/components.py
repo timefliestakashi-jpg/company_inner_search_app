@@ -9,6 +9,69 @@ import streamlit as st
 import utils
 import constants as ct
 from typing import Optional
+# NEW: 追加インポート
+from pathlib import Path
+import os
+
+# NEW: データルート解決ヘルパー（env / secrets / constants を順に見る）
+def _get_data_root() -> Path:
+    candidates = []
+    try:
+        if "DATA_ROOT" in st.secrets:
+            candidates.append(st.secrets["DATA_ROOT"])
+    except Exception:
+        pass
+    if os.getenv("DATA_ROOT"):
+        candidates.append(os.getenv("DATA_ROOT"))
+    if hasattr(ct, "DATA_DIR"):
+        candidates.append(getattr(ct, "DATA_DIR"))
+    candidates.append(Path(__file__).resolve().parent / "data")  # デフォルト
+
+    for c in candidates:
+        try:
+            return Path(c).resolve()
+        except Exception:
+            continue
+    return Path(__file__).resolve().parent
+
+# NEW: データルートを基準に、絶対パスを相対表示用に正規化（デプロイ先でも安定）
+def _normalize_source_path(path: str) -> str:
+    if not path:
+        return ""
+    s = str(path).replace("\\", "/")  # Windows区切り対策
+    parts = [p for p in s.split("/") if p]
+
+    # 1) どこかに "data" セグメントが含まれていれば、そこからの相対にする
+    for i, part in enumerate(parts):
+        if part.lower() == "data":
+            tail = "/".join(parts[i:])
+            return f"./{tail}"
+
+    # 2) DATA_ROOT が分かるなら、その配下相対にする
+    try:
+        data_root = _get_data_root()
+        rel = os.path.relpath(s, start=str(data_root))
+        if not rel.startswith(".."):
+            return f"./{rel}"
+    except Exception:
+        pass
+
+    # 3) それでも無理ならファイル名のみ（環境依存の絶対パスは出さない）
+    return os.path.basename(s)
+
+def _format_file_info(path: str, page_number: Optional[int] = None) -> str:
+    """
+    ファイルパスを表示用に整形する。
+    PDFでページ番号がある場合は「（ページNo.X）」を付与。
+    """
+    # NEW: 先にパスを正規化してから表示（デプロイ先でも ./data/... 表示）
+    path = _normalize_source_path(path)
+    if path.lower().endswith(".pdf") and page_number is not None:
+        try:
+            return f"{path}（ページNo.{int(page_number)+1}）"
+        except Exception:
+            return f"{path}（ページNo.{page_number}）"
+    return path
 
 ############################################################
 # 関数定義
@@ -108,18 +171,6 @@ def display_conversation_log():
                             icon = utils.get_source_icon(file_info)
                             st.info(file_info, icon=icon)
 
-def _format_file_info(path: str, page_number: Optional[int] = None) -> str:
-    """
-    ファイルパスを表示用に整形する。
-    PDFでページ番号がある場合は「（ページNo.X）」を付与。
-    """
-    if path.lower().endswith(".pdf") and page_number is not None:
-        try:
-            return f"{path}（ページNo.{int(page_number)+1}）"
-        except Exception:
-            return f"{path}（ページNo.{page_number}）"
-    return path
-
 def display_search_llm_response(llm_response):
     """
     「社内文書検索」モードにおけるLLMレスポンスを表示
@@ -147,9 +198,9 @@ def display_search_llm_response(llm_response):
 
             if "page" in document.metadata:
                 sub_page_number = document.metadata["page"]
-                sub_choice = {"source": sub_file_path, "page_number": sub_page_number}
+                sub_choice = {"source": _normalize_source_path(sub_file_path), "page_number": sub_page_number}  # NEW: 正規化
             else:
-                sub_choice = {"source": sub_file_path}
+                sub_choice = {"source": _normalize_source_path(sub_file_path)}  # NEW: 正規化
             sub_choices.append(sub_choice)
 
         if sub_choices:
@@ -157,13 +208,12 @@ def display_search_llm_response(llm_response):
             st.markdown(sub_message)
             for sub_choice in sub_choices:
                 icon = utils.get_source_icon(sub_choice['source'])
-                # PDF ならページ番号を付けて表示
                 st.info(_format_file_info(sub_choice['source'], sub_choice.get("page_number")), icon=icon)
 
         content = {}
         content["mode"] = ct.ANSWER_MODE_1
         content["main_message"] = main_message
-        content["main_file_path"] = main_file_path
+        content["main_file_path"] = _normalize_source_path(main_file_path)  # NEW: 正規化して保存
         if main_page_number is not None:
             content["main_page_number"] = main_page_number
         if sub_choices:
@@ -199,8 +249,9 @@ def display_contact_llm_response(llm_response):
                 continue
 
             page_number = document.metadata.get("page")
-            # PDF の場合だけページ番号を付けて表示する
-            file_info = _format_file_info(file_path, page_number)
+            # NEW: 表示前にパスを正規化
+            display_path = _normalize_source_path(file_path)
+            file_info = _format_file_info(display_path, page_number)
 
             icon = utils.get_source_icon(file_path)
             st.info(file_info, icon=icon)
