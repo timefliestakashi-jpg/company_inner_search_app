@@ -109,33 +109,51 @@ def initialize_retriever():
     if "retriever" in st.session_state:
         return
     
-    # RAGの参照先となるデータソースの読み込み
-    docs_all = load_data_sources()
+    try:
+        # RAGの参照先となるデータソースの読み込み
+        docs_all = load_data_sources()
+        
+        print(f"読み込んだドキュメント数: {len(docs_all)}")
+        if len(docs_all) == 0:
+            print("⚠ Warning: No documents were loaded!")
+            st.session_state.retriever_failed = True
+            st.session_state.retriever = None
+            return
 
-    # OSがWindowsの場合、Unicode正規化と、cp932（Windows用の文字コード）で表現できない文字を除去
-    for doc in docs_all:
-        doc.page_content = adjust_string(doc.page_content)
-        for key in doc.metadata:
-            doc.metadata[key] = adjust_string(doc.metadata[key])
-    
-    # 埋め込みモデルの用意
-    embeddings = OpenAIEmbeddings()
-    
-    # チャンク分割用のオブジェクトを作成
-    text_splitter = CharacterTextSplitter(
-        chunk_size=ct.CHUNK_SIZE,
-        chunk_overlap=ct.CHUNK_OVERLAP,
-        separator="\n"
-    )
+        # OSがWindowsの場合、Unicode正規化と、cp932（Windows用の文字コード）で表現できない文字を除去
+        for doc in docs_all:
+            doc.page_content = adjust_string(doc.page_content)
+            for key in doc.metadata:
+                doc.metadata[key] = adjust_string(doc.metadata[key])
+        
+        # 埋め込みモデルの用意
+        embeddings = OpenAIEmbeddings()
+        
+        # チャンク分割用のオブジェクトを作成
+        text_splitter = CharacterTextSplitter(
+            chunk_size=ct.CHUNK_SIZE,
+            chunk_overlap=ct.CHUNK_OVERLAP,
+            separator="\n"
+        )
 
-    # チャンク分割を実施
-    splitted_docs = text_splitter.split_documents(docs_all)
+        # チャンク分割を実施
+        splitted_docs = text_splitter.split_documents(docs_all)
 
-    # ベクターストアの作成
-    db = Chroma.from_documents(splitted_docs, embedding=embeddings)
+        # ベクターストアの作成
+        db = Chroma.from_documents(splitted_docs, embedding=embeddings)
 
-    # ベクターストアを検索するRetrieverの作成
-    st.session_state.retriever = db.as_retriever(search_kwargs={"k": 5})
+        # ベクターストアを検索するRetrieverの作成
+        st.session_state.retriever = db.as_retriever(search_kwargs={"k": 5})
+        
+        print("✓ Retriever initialized successfully")
+        
+    except Exception as e:
+        print(f"⚠ Warning: Failed to initialize retriever: {str(e)}")
+        print("  App will start but search functionality will be limited.")
+        logger.warning(f"Retriever initialization failed: {str(e)}")
+        # Set a flag to indicate retriever initialization failed
+        st.session_state.retriever_failed = True
+        st.session_state.retriever = None
 
 
 def initialize_session_state():
@@ -165,11 +183,17 @@ def load_data_sources():
     # ファイルとは別に、指定のWebページ内のデータも読み込み
     # 読み込み対象のWebページ一覧に対して処理
     for web_url in ct.WEB_URL_LOAD_TARGETS:
-        # 指定のWebページを読み込み
-        loader = WebBaseLoader(web_url)
-        web_docs = loader.load()
-        # for文の外のリストに読み込んだデータソースを追加
-        web_docs_all.extend(web_docs)
+        try:
+            # 指定のWebページを読み込み
+            loader = WebBaseLoader(web_url)
+            web_docs = loader.load()
+            # for文の外のリストに読み込んだデータソースを追加
+            web_docs_all.extend(web_docs)
+            print(f"✓ Web URL loaded successfully: {web_url}")
+        except Exception as e:
+            # Web URLの読み込みに失敗した場合、警告を出力して続行
+            print(f"⚠ Warning: Failed to load web URL {web_url}: {str(e)}")
+            print("  Continuing with file-based data sources only...")
     # 通常読み込みのデータソースにWebページのデータを追加
     docs_all.extend(web_docs_all)
 
@@ -246,8 +270,3 @@ def adjust_string(s):
     
     # OSがWindows以外の場合はそのまま返す
     return s
-
-docs_all = load_data_sources()
-print(f"読み込んだドキュメント数: {len(docs_all)}")
-for i, doc in enumerate(docs_all[:3]):  # 先頭3件だけ表示
-    print(f"Doc {i}: {doc.page_content[:100]}...")  # 内容の先頭100文字だけ
