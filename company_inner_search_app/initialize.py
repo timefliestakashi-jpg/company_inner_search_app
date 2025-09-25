@@ -202,22 +202,26 @@ def recursive_file_check(path, docs_all):
 def file_load(path, docs_all):
     """
     ファイル内のデータ読み込み
-
-    Args:
-        path: ファイルパス
-        docs_all: データソースを格納する用のリスト
     """
-    # ファイルの拡張子を取得
     file_extension = os.path.splitext(path)[1]
-    # ファイル名（拡張子を含む）を取得
     file_name = os.path.basename(path)
 
-    # 想定していたファイル形式の場合のみ読み込む
     if file_extension in ct.SUPPORTED_EXTENSIONS:
-        # ファイルの拡張子に合ったdata loaderを使ってデータ読み込み
         loader = ct.SUPPORTED_EXTENSIONS[file_extension](path)
         docs = loader.load()
+
+        # ★ 読み込み直後に必ず source を埋める（絶対パスの文字列）
+        abs_path = os.path.abspath(path)
+        for d in docs:
+            if not isinstance(d.metadata, dict):
+                d.metadata = {}
+            d.metadata["source"] = abs_path             # ←これが「本命修正」
+            # あると便利な補助メタ情報
+            d.metadata.setdefault("filename", file_name)
+            d.metadata.setdefault("ext", file_extension)
+
         docs_all.extend(docs)
+
 
 
 def adjust_string(s):
